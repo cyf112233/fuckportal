@@ -49,8 +49,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
 
         int maxSize = Math.max(1, plugin.getConfig().getInt("max-portal-size", 2048));
         int perTick = Math.max(1, plugin.getConfig().getInt("flood-per-tick", 256));
-        // 取消默认点火，改为启动渐进式填充任务，避免主线程长阻塞
-        event.setCancelled(true);
+        // 保留原版点火/点燃行为，同时异步尝试生成传送门
         new PortalFillTask(target, maxSize, perTick).start();
     }
 
@@ -72,8 +71,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
 
         int maxSize = Math.max(1, plugin.getConfig().getInt("max-portal-size", 2048));
         int perTick = Math.max(1, plugin.getConfig().getInt("flood-per-tick", 256));
-        // 取消原版交互，改为启动渐进式填充任务
-        event.setCancelled(true);
+        // 保留原版交互（点火/TNT等），同时异步尝试生成传送门
         new PortalFillTask(target, maxSize, perTick).start();
     }
 
