@@ -28,7 +28,7 @@ import java.util.*;
  * 逻辑：
  * - 监听打火石点火（BlockIgniteEvent, cause=FLINT_AND_STEEL）
  * - 以被点燃位置为起点，在两个可能的平面（Axis.X 和 Axis.Z）各做一次二维洪水填充（仅在该平面内的4连通）
- * - 内部为空气/火/已有传送门方块，边界必须是黑曜石；若遇到其它方块或区域过大，视为无效
+ * - 内部为空气/火/已有传送门方块，边界必须是黑曜石或哭泣的黑曜石；若遇到其它方块或区域过大，视为无效
  * - 若某个平面填充成功，则将该连通区域全部替换为NETHER_PORTAL，并设置对应轴向
  */
 @AutoRegister
@@ -135,7 +135,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
                             interior.add(nb);
                             queue.add(nb);
                         }
-                    } else if (m == Material.OBSIDIAN) {
+                    } else if (m == Material.OBSIDIAN || m == Material.CRYING_OBSIDIAN) {
                         // 边界OK
                     } else {
                         valid = false;
@@ -229,7 +229,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
      *
      * 规则：
      * - 可填充：AIR / FIRE / NETHER_PORTAL
-     * - 合法边界：OBSIDIAN
+     * - 合法边界：OBSIDIAN / CRYING_OBSIDIAN
      * - 触碰到除 OBSIDIAN 外的其它方块作为边界，或区域超过配置上限，则判定为无效
      */
     private FillResult floodFillInPlane(Block start, Axis axis, int maxSize) {
@@ -292,7 +292,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
                         interior.add(nb);
                         queue.add(nb);
                     }
-                } else if (m == Material.OBSIDIAN) {
+                } else if (m == Material.OBSIDIAN || m == Material.CRYING_OBSIDIAN) {
                     // 合法边界，忽略
                 } else {
                     // 非法边界，判定失败（例如石头、玻璃等）
