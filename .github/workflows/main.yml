@@ -1,0 +1,65 @@
+name: bukkit plugin build and release
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    - name: Generate Timestamp
+      run: |
+        TAG_NAME="v$(date -u +'%Y_%m_%d__%H_%M_%S')"
+        BUILD_DATE_UTC=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+        BUILD_DATE_BJ=$(TZ="Asia/Shanghai" date +'%Y-%m-%d %H:%M:%S UTC+8')
+        REPO_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d '/' -f2)
+        RELEASE_TITLE="${REPO_NAME}-V${TAG_NAME:1}"
+        echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+        echo "BUILD_DATE_UTC=${BUILD_DATE_UTC}" >> $GITHUB_ENV
+        echo "BUILD_DATE_BJ=${BUILD_DATE_BJ}" >> $GITHUB_ENV
+        echo "RELEASE_TITLE=${RELEASE_TITLE}" >> $GITHUB_ENV
+    - name: Change gradlew permissions
+      run: chmod +x ./gradlew
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+    - name: Build with Gradle
+      run: ./gradlew build -Pversion=${{ env.TAG_NAME }}
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ github.event.repository.name }}-build
+        path: build/libs/*
+    - name: Create Tag
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git tag ${{ env.TAG_NAME }}
+        git push origin ${{ env.TAG_NAME }}
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.TAG_NAME }}
+        name: ${{ env.RELEASE_TITLE }}
+        body: |
+          自动构建发布
+          - 构建时间（UTC）：${{ env.BUILD_DATE_UTC }}
+          - 构建时间（北京时间）：${{ env.BUILD_DATE_BJ }}
+          - 提交哈希：`${{ github.sha }}`
+        draft: false
+        files: build/libs/*
