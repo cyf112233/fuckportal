@@ -16,4 +16,4 @@ permissions:
     default: op
   byd.fuckportal.create:
     description: 'Exempt from portal creation fees'
-    default: op
+    default: true

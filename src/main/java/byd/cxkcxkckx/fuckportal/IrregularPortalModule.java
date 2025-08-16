@@ -239,50 +239,69 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
                     }
                 }
                 if (chosenAxis != null && interior != null && !interior.isEmpty()) {
-                    // Payment / confirmation flow
-                    Player p = owner;
-                    if (p != null && p.hasPermission("byd.fuckportal.free")) {
-                        placePortal(interior, chosenAxis);
-                        try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
-                    } else if (p != null) {
-                        // compute cost
-                        double per = plugin.getConfig().getDouble("portal-cost-per-block", 10.0);
-                        double cost = per * interior.size();
-                        // Check economy available
-                        Economy econ = null;
-                        try {
-                            org.bukkit.plugin.RegisteredServiceProvider<Economy> reg = plugin.getServer().getServicesManager().getRegistration(Economy.class);
-                            if (reg != null) econ = reg.getProvider();
-                        } catch (Throwable ignored) {}
-                        if (econ == null) {
-                            // no economy plugin -> silently place portal
-                            placePortal(interior, chosenAxis);
-                            try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
-                        } else {
-                            // put pending and ask for confirmation
-                            p.sendMessage(ChatColor.LIGHT_PURPLE + "\n\n==========[" + ChatColor.YELLOW + "FuckPortal" + ChatColor.LIGHT_PURPLE + "]===========\n" + ChatColor.LIGHT_PURPLE + "===============================\n" + ChatColor.YELLOW + "检测到传送门将使用 " + ChatColor.LIGHT_PURPLE + interior.size() + ChatColor.YELLOW + " 个方块，费用: " + ChatColor.LIGHT_PURPLE + cost + ChatColor.YELLOW + "。\n" + ChatColor.YELLOW + "在 " + plugin.getConfig().getInt("portal-confirm-timeout", 10) + " 秒内输入 /ccb 确认扣费并生成传送门。\n" + ChatColor.LIGHT_PURPLE + "===============================\n" + ChatColor.YELLOW + "如果你制作的是原版传送门，请忽略此消息。\n" + ChatColor.YELLOW + "原版传送门会自动激活\n" + ChatColor.LIGHT_PURPLE + "===============================");
-                            UUID uid = p.getUniqueId();
-                            // cancel existing pending if any
-                            PendingPayment old = pendingPayments.remove(uid);
-                            if (old != null) {
-                                try { old.timeoutTask.cancel(); } catch (Throwable ignored) {}
-                            }
-                            int timeoutSec = Math.max(1, plugin.getConfig().getInt("portal-confirm-timeout", 10));
-                            BukkitRunnable task = new BukkitRunnable() {
-                                @Override
-                                public void run() {
-                                    pendingPayments.remove(uid);
-                                    p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 传送门付费确认已超时。");
+                    final Player p = owner;
+                    final Axis finalAxis = chosenAxis;
+                    final Set<Block> finalInterior = new HashSet<>(interior);
+                    // delay 3 ticks before checking free-permission and asking for payment
+                    new BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                // If the player clicked face already has a portal block, ask for payment and do not generate
+                                if (p != null && start.getType() == Material.NETHER_PORTAL) {
+                                    // 点击面已有传送门：静默结束（不提示，不扣费）
+                                    return;
                                 }
-                            };
-                            task.runTaskLater(plugin, timeoutSec * 20L);
-                            pendingPayments.put(uid, new PendingPayment(new HashSet<>(interior), chosenAxis, cost, task));
+
+                                if (p != null && p.hasPermission("byd.fuckportal.free")) {
+                                    placePortal(finalInterior, finalAxis);
+                                    try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+                                    return;
+                                }
+
+                                if (p != null) {
+                                    // compute cost
+                                    double per = plugin.getConfig().getDouble("portal-cost-per-block", 10.0);
+                                    double cost = per * finalInterior.size();
+                                    // Check economy available
+                                    Economy econ = null;
+                                    try {
+                                        org.bukkit.plugin.RegisteredServiceProvider<Economy> reg = plugin.getServer().getServicesManager().getRegistration(Economy.class);
+                                        if (reg != null) econ = reg.getProvider();
+                                    } catch (Throwable ignored) {}
+                                    if (econ == null) {
+                                        // no economy plugin -> silently place portal
+                                        placePortal(finalInterior, finalAxis);
+                                        try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+                                    } else {
+                                        // put pending and ask for confirmation
+                                        p.sendMessage(ChatColor.LIGHT_PURPLE + "\n\n==========[" + ChatColor.YELLOW + "FuckPortal" + ChatColor.LIGHT_PURPLE + "]===========\n" + ChatColor.LIGHT_PURPLE + "===============================\n" + ChatColor.YELLOW + "检测到传送门将使用 " + ChatColor.LIGHT_PURPLE + finalInterior.size() + ChatColor.YELLOW + " 个方块，费用: " + ChatColor.LIGHT_PURPLE + cost + ChatColor.YELLOW + "。\n" + ChatColor.YELLOW + "在 " + plugin.getConfig().getInt("portal-confirm-timeout", 10) + " 秒内输入 /ccb 确认扣费并生成传送门。\n" + ChatColor.LIGHT_PURPLE + "===============================");
+                                        UUID uid = p.getUniqueId();
+                                        // cancel existing pending if any
+                                        PendingPayment old = pendingPayments.remove(uid);
+                                        if (old != null) {
+                                            try { old.timeoutTask.cancel(); } catch (Throwable ignored) {}
+                                        }
+                                        int timeoutSec = Math.max(1, plugin.getConfig().getInt("portal-confirm-timeout", 10));
+                                        BukkitRunnable task = new BukkitRunnable() {
+                                            @Override
+                                            public void run() {
+                                                pendingPayments.remove(uid);
+                                                p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 传送门付费确认已超时。");
+                                            }
+                                        };
+                                        task.runTaskLater(plugin, timeoutSec * 20L);
+                                        pendingPayments.put(uid, new PendingPayment(new HashSet<>(finalInterior), finalAxis, cost, task));
+                                    }
+                                    return;
+                                }
+
+                                // no player reference -> just place
+                                placePortal(finalInterior, finalAxis);
+                                try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+                            } catch (Throwable ignored) {}
                         }
-                    } else {
-                        // no player reference -> just place
-                        placePortal(interior, chosenAxis);
-                        try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
-                    }
+                    }.runTaskLater(plugin, 3L);
                 }
             }
         }
