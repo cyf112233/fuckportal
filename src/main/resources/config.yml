@@ -1,4 +1,8 @@
 # FuckPortal configuration
+# 每个传送门方块的费用
+portal-cost-per-block: 10.0
+# 传送门费用确认超时时间（秒）
+portal-confirm-timeout: 10
 # max-portal-size: 单个非规则下界门的最大“内域”方块数量限制（单位：方块数）。
 # 最小值为 1（仅一个洞）。若填写小于 1 的值将按 1 处理。
 max-portal-size: 2048

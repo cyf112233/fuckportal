@@ -2,9 +2,18 @@ name: fuckportal
 version: '${version}'
 main: byd.cxkcxkckx.fuckportal.fuckportal
 api-version: 1.13
-depend: [  ]
-softdepend: [ PlaceholderAPI ]
+depend: []
+softdepend: [ PlaceholderAPI, vault ]
 authors: [ cxkcxkckx ]
 commands:
-  example:
-    description: 'The main command of ExmaplePlugin'
+  ccb:
+    description: 'Confirm payment and create portal'
+    usage: /ccb
+
+permissions:
+  byd.fuckportal.free:
+    description: 'Exempt from portal creation fees'
+    default: op
+  byd.fuckportal.create:
+    description: 'Exempt from portal creation fees'
+    default: op

@@ -23,6 +23,7 @@ repositories {
     maven("https://repo.helpch.at/releases/")
     maven("https://jitpack.io")
     maven("https://repo.rosewooddev.io/repository/public/")
+    maven("https://repo.rosewooddev.io/repository/public/")
 }
 
 dependencies {
@@ -30,7 +31,7 @@ dependencies {
     // compileOnly("org.spigotmc:spigot:1.20") // NMS
 
     compileOnly("me.clip:placeholderapi:2.11.6")
-
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7")
     // implementation("com.github.technicallycoded:FoliaLib:0.4.4")
     implementation("org.jetbrains:annotations:24.0.0")
     implementation("top.mrxiaom:PluginBase:1.4.9")

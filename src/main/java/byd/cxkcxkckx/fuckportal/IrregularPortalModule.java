@@ -19,6 +19,10 @@ import org.bukkit.event.block.Action;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
+
+import org.bukkit.ChatColor;
 import top.mrxiaom.pluginbase.func.AutoRegister;
 
 import java.util.*;
@@ -41,7 +45,18 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onIgnite(BlockIgniteEvent event) {
         if (event.getCause() != BlockIgniteEvent.IgniteCause.FLINT_AND_STEEL) return;
-
+        if (!event.getPlayer().hasPermission("byd.fuckportal.create") && !event.getPlayer().isOp()) {
+            return;
+        }
+        // 如果是玩家手持打火石造成的点火，让 onInteract 处理，避免重复询问
+        if (event.getPlayer() != null) {
+            try {
+                org.bukkit.entity.Player p0 = event.getPlayer();
+                if (p0.getInventory() != null && p0.getInventory().getItemInMainHand() != null && p0.getInventory().getItemInMainHand().getType() == Material.FLINT_AND_STEEL) {
+                    return;
+                }
+            } catch (Throwable ignored) {}
+        }
         Block target = event.getBlock(); // 将要被点燃为火的方块
         // 只在起点为空气/火/已有传送门时尝试（通常为空气）
         Material m0 = target.getType();
@@ -50,12 +65,16 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
         int maxSize = Math.max(1, plugin.getConfig().getInt("max-portal-size", 2048));
         int perTick = Math.max(1, plugin.getConfig().getInt("flood-per-tick", 256));
         // 保留原版点火/点燃行为，同时异步尝试生成传送门
-        new PortalFillTask(target, maxSize, perTick).start();
+    new PortalFillTask(target, maxSize, perTick, event.getPlayer()).start();
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onInteract(PlayerInteractEvent event) {
         if (event.getHand() != null && event.getHand() == EquipmentSlot.OFF_HAND) return; // 避免副手重复触发
+        // 在onInteract方法开头添加
+        if (!event.getPlayer().hasPermission("byd.fuckportal.create") && !event.getPlayer().isOp()) {
+            return;
+        }
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
         Player player = event.getPlayer();
@@ -72,7 +91,24 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
         int maxSize = Math.max(1, plugin.getConfig().getInt("max-portal-size", 2048));
         int perTick = Math.max(1, plugin.getConfig().getInt("flood-per-tick", 256));
         // 保留原版交互（点火/TNT等），同时异步尝试生成传送门
-        new PortalFillTask(target, maxSize, perTick).start();
+        new PortalFillTask(target, maxSize, perTick, player).start();
+    }
+
+    // pending confirmations: player UUID -> pending payment
+    private static final Map<UUID, PendingPayment> pendingPayments = new HashMap<>();
+
+    private static class PendingPayment {
+        final Set<Block> interior;
+        final Axis axis;
+        final double cost;
+        final BukkitRunnable timeoutTask;
+
+        PendingPayment(Set<Block> interior, Axis axis, double cost, BukkitRunnable timeoutTask) {
+            this.interior = interior;
+            this.axis = axis;
+            this.cost = cost;
+            this.timeoutTask = timeoutTask;
+        }
     }
 
     private class BFSState {
@@ -133,7 +169,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
                             interior.add(nb);
                             queue.add(nb);
                         }
-                    } else if (m == Material.OBSIDIAN || m == Material.CRYING_OBSIDIAN) {
+                    } else if (m == Material.OBSIDIAN || "CRYING_OBSIDIAN".equals(m.name())) {
                         // 边界OK
                     } else {
                         valid = false;
@@ -149,15 +185,17 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
     }
 
     private class PortalFillTask extends BukkitRunnable {
-        private final Block start;
+    private final Block start;
         private final int maxSize;
         private final int perTick;
-        private BFSState sx, sz;
+    private BFSState sx, sz;
+    private final Player owner;
 
-        PortalFillTask(Block start, int maxSize, int perTick) {
+        PortalFillTask(Block start, int maxSize, int perTick, Player owner) {
             this.start = start;
             this.maxSize = maxSize;
             this.perTick = perTick;
+            this.owner = owner;
         }
 
         void start() {
@@ -201,13 +239,110 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
                     }
                 }
                 if (chosenAxis != null && interior != null && !interior.isEmpty()) {
-                    placePortal(interior, chosenAxis);
-                    try {
-                        World w = start.getWorld();
-                        w.playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f);
-                    } catch (Throwable ignored) {}
+                    // Payment / confirmation flow
+                    Player p = owner;
+                    if (p != null && p.hasPermission("byd.fuckportal.free")) {
+                        placePortal(interior, chosenAxis);
+                        try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+                    } else if (p != null) {
+                        // compute cost
+                        double per = plugin.getConfig().getDouble("portal-cost-per-block", 10.0);
+                        double cost = per * interior.size();
+                        // Check economy available
+                        Economy econ = null;
+                        try {
+                            org.bukkit.plugin.RegisteredServiceProvider<Economy> reg = plugin.getServer().getServicesManager().getRegistration(Economy.class);
+                            if (reg != null) econ = reg.getProvider();
+                        } catch (Throwable ignored) {}
+                        if (econ == null) {
+                            // no economy plugin -> silently place portal
+                            placePortal(interior, chosenAxis);
+                            try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+                        } else {
+                            // put pending and ask for confirmation
+                            p.sendMessage(ChatColor.LIGHT_PURPLE + "\n\n==========[" + ChatColor.YELLOW + "FuckPortal" + ChatColor.LIGHT_PURPLE + "]===========\n" + ChatColor.LIGHT_PURPLE + "===============================\n" + ChatColor.YELLOW + "检测到传送门将使用 " + ChatColor.LIGHT_PURPLE + interior.size() + ChatColor.YELLOW + " 个方块，费用: " + ChatColor.LIGHT_PURPLE + cost + ChatColor.YELLOW + "。\n" + ChatColor.YELLOW + "输入 /ccb 在 " + plugin.getConfig().getInt("portal-confirm-timeout", 10) + " 秒内确认扣费并生成传送门。\n" + ChatColor.LIGHT_PURPLE + "===============================\n" + ChatColor.YELLOW + "如果你制作的是原版传送门，请忽略此消息。\n" + ChatColor.YELLOW + "原版传送门会自动激活\n" + ChatColor.LIGHT_PURPLE + "===============================");
+                            UUID uid = p.getUniqueId();
+                            // cancel existing pending if any
+                            PendingPayment old = pendingPayments.remove(uid);
+                            if (old != null) {
+                                try { old.timeoutTask.cancel(); } catch (Throwable ignored) {}
+                            }
+                            int timeoutSec = Math.max(1, plugin.getConfig().getInt("portal-confirm-timeout", 10));
+                            BukkitRunnable task = new BukkitRunnable() {
+                                @Override
+                                public void run() {
+                                    pendingPayments.remove(uid);
+                                    p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 传送门付费确认已超时。");
+                                }
+                            };
+                            task.runTaskLater(plugin, timeoutSec * 20L);
+                            pendingPayments.put(uid, new PendingPayment(new HashSet<>(interior), chosenAxis, cost, task));
+                        }
+                    } else {
+                        // no player reference -> just place
+                        placePortal(interior, chosenAxis);
+                        try { start.getWorld().playSound(start.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+                    }
                 }
             }
+        }
+    }
+
+    // Called by /ccb command
+    public static void confirmPendingByPlayer(Player p) {
+        PendingPayment pending = pendingPayments.remove(p.getUniqueId());
+        if (pending == null) {
+            p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 你没有待确认的传送门生成请求。");
+            return;
+        }
+        // cancel timeout
+        try { pending.timeoutTask.cancel(); } catch (Throwable ignored) {}
+        // economy check & withdraw
+        Economy econ = null;
+        try {
+            org.bukkit.plugin.RegisteredServiceProvider<Economy> reg = fuckportal.getInstance().getServer().getServicesManager().getRegistration(Economy.class);
+            if (reg != null) econ = reg.getProvider();
+        } catch (Throwable ignored) {}
+        if (econ == null) {
+            // economy not available -> silently place portal for pending
+            try {
+                World w = p.getWorld();
+                for (Block b : pending.interior) {
+                    BlockData data = Bukkit.createBlockData(Material.NETHER_PORTAL);
+                    if (data instanceof Orientable) {
+                        Axis blockAxis = (pending.axis == Axis.X ? Axis.Z : Axis.X);
+                        ((Orientable) data).setAxis(blockAxis);
+                    }
+                    b.setBlockData(data, false);
+                }
+                try { w.playSound(p.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+            } catch (Throwable ex) {
+                // silently ignore
+            }
+            return;
+        }
+        double cost = pending.cost;
+    org.bukkit.OfflinePlayer offline = fuckportal.getInstance().getServer().getOfflinePlayer(p.getUniqueId());
+    EconomyResponse resp = econ.withdrawPlayer(offline, cost);
+        if (resp.transactionSuccess()) {
+            // place portal
+            try {
+                World w = p.getWorld();
+                for (Block b : pending.interior) {
+                    BlockData data = Bukkit.createBlockData(Material.NETHER_PORTAL);
+                    if (data instanceof Orientable) {
+                        Axis blockAxis = (pending.axis == Axis.X ? Axis.Z : Axis.X);
+                        ((Orientable) data).setAxis(blockAxis);
+                    }
+                    b.setBlockData(data, false);
+                }
+                p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 已扣款 " + cost + " 并生成传送门。");
+                try { w.playSound(p.getLocation(), Sound.BLOCK_PORTAL_AMBIENT, 1f, 1f); } catch (Throwable ignored) {}
+            } catch (Throwable ex) {
+                p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 生成传送门时出错: " + ex.getMessage());
+            }
+        } else {
+            p.sendMessage(ChatColor.YELLOW + "[FuckPortal] 扣费失败: " + resp.errorMessage);
         }
     }
 
@@ -290,7 +425,7 @@ public class IrregularPortalModule extends AbstractModule implements Listener {
                         interior.add(nb);
                         queue.add(nb);
                     }
-                } else if (m == Material.OBSIDIAN || m == Material.CRYING_OBSIDIAN) {
+                } else if (m == Material.OBSIDIAN || "CRYING_OBSIDIAN".equals(m.name())) {
                     // 合法边界，忽略
                 } else {
                     // 非法边界，判定失败（例如石头、玻璃等）
